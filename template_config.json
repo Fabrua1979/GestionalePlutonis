@@ -1,0 +1,15 @@
+{
+  "description": "PowerPoint-style slide presentation framework for the web. What it is: Build presentation slides/slide decks with sequential navigation, grouped animations, click-to-advance, speaker notes, outline/thumbnail preview, timed autoplay, presenter-friendly UI, and slide auto-registration. Typical uses: pitch decks, keynotes, conference talks, product launches, educational courseware, business reports, academic defenses. Not for: general web apps/CRUD/dashboards/admin panels/CMS/landing pages/tools/games/posters.Keywords (non-exhaustive): PPT, PowerPoint, presentation, slide, slides, slide deck, keynote, pitch deck, speaker notes, courseware, slideshow. Common variants: power point, powepoint, presenation, pptx. Tech stack: React 18 + TypeScript + Vite + Tailwind + shadcn/ui. For slide development rules & best practices, see `src/pages/slides/README.md`. **IMPORTANT**: Focus on slide content in `src/pages/slides/` directory. Don't modify any files inside `src/pages/core/`,`src/hooks/`,`src/types/,`src/decorators/,`src/pages/`; these are internal utilities.",
+  "required_fields": [],
+  "required_files": [
+    "src/pages/slides/IntroSlide.tsx",
+    "src/pages/slides/end.tsx",
+    "src/components/core/importSlide.ts",
+    "README.md",
+    "index.html"
+  ],
+  "lang": "typescript",
+  "framework": "react",
+  "name": "ppt_presentation_template",
+  "scene": "ppt_presentation_web"
+}
