@@ -1,98 +1,88 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
 import io
 
-st.set_page_config(page_title="Wheel Strategy Pro Scanner", layout="wide")
+st.set_page_config(page_title="Global Wheel Scanner", layout="wide")
 
-# --- 1. GESTIONE API KEY ---
-if "FMP_API_KEY" in st.secrets:
-    API_KEY = st.secrets["FMP_API_KEY"]
-else:
-    API_KEY = st.sidebar.text_input("Inserisci FMP API Key", type="password", value="uZJbm6FkDS56ktyFfzvh5flhePsbh4rz")
+# --- 1. CHIAVE API ---
+API_KEY = st.sidebar.text_input("Inserisci FMP API Key", type="password", value="sQJgPn10EvTF6U4HzkVRukBF0Y0ijMrL")
 
-def get_fmp_data(endpoint, params=""):
+def get_fmp(endpoint, params=""):
     url = f"https://financialmodelingprep.com/api/v3/{endpoint}?apikey={API_KEY}{params}"
     try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 401:
-            st.error(f"🔑 Errore 401: La chiave API non è autorizzata per l'endpoint '{endpoint}'.")
-            return None
-        return None
+        r = requests.get(url)
+        return r.json() if r.status_code == 200 else None
     except:
         return None
 
-# --- 2. SIDEBAR PARAMETRI ---
-st.sidebar.header("⚙️ Parametri Screening")
-mcap_min = st.sidebar.slider("Market Cap Minima (Miliardi $)", 10, 500, 50)
-div_min = st.sidebar.number_input("Dividend Yield Min (%)", value=1.0)
-vol_min = st.sidebar.slider("Volatilità Mensile Min (%)", 0.5, 10.0, 1.5)
+# --- 2. FILTRI LATERALI ---
+st.sidebar.header("🔍 Filtri Ricerca Totale")
+mcap_limit = st.sidebar.slider("Market Cap Min (Miliardi $)", 2, 500, 10)
+div_limit = st.sidebar.number_input("Dividendo Minimo (%)", value=1.0)
+max_results = st.sidebar.number_input("Numero max titoli da analizzare", value=100)
 
-st.title("🎯 Wheel Strategy Pro Scanner")
-st.caption("Connessione API FMP ottimizzata. Filtraggio interno attivo.")
+st.title("🌐 Global Wheel Market Scanner")
+st.write("Scansione profonda su tutti i mercati USA (NASDAQ, NYSE, AMEX).")
 
-if st.button('🚀 AVVIA SCANSIONE MERCATO'):
-    status_text = st.empty()
-    status_text.info("Fase 1: Recupero lista titoli dal database principale...")
+if st.button('🚀 AVVIA SCANSIONE COMPLETA'):
+    with st.spinner("Recupero database titoli globale..."):
+        # Recuperiamo la lista di TUTTI i titoli scambiati (migliaia)
+        # Questo endpoint è più stabile dello screener
+        full_list = get_fmp("stock/list")
     
-    # CAMBIO STRATEGIA: Usiamo stock/list invece dello screener per evitare il blocco 401
-    all_stocks = get_fmp_data("stock/list")
-    
-    if all_stocks:
-        # Filtriamo i primi 40 titoli NASDAQ/NYSE con Market Cap elevata (simulata per velocizzare)
-        # In questa versione prendiamo i titoli principali per testare la connessione
-        target_exchanges = ['NASDAQ', 'NYSE']
-        stocks = [s for s in all_stocks if s.get('exchangeShortName') in target_exchanges and s.get('type') == 'stock'][:40]
+    if full_list:
+        # Filtriamo solo azioni ordinarie USA (escludiamo ETF e fondi)
+        base_stocks = [s for s in full_list if s.get('type') == 'stock' and s.get('exchangeShortName') in ['NASDAQ', 'NYSE', 'AMEX']]
         
         results = []
         progress_bar = st.progress(0)
+        status = st.empty()
         
-        for i, s in enumerate(stocks):
+        count = 0
+        for s in base_stocks:
+            if count >= max_results: break
+            
             symbol = s['symbol']
-            status_text.text(f"🔎 Analisi tecnica e dividendi di {symbol} ({i+1}/{len(stocks)})...")
+            status.text(f"Analisi fondamentale di {symbol} ({count}/{max_results})...")
             
-            # Recupero Profilo (per Market Cap e Dividendi)
-            profile = get_fmp_data(f"profile/{symbol}")
-            if not profile: continue
-            p = profile[0]
-            
-            mcap = p.get('mktCap', 0) / 1_000_000_000
-            d_yield = p.get('lastDiv', 0)
-            
-            # Applichiamo i filtri fondamentali
-            if mcap >= mcap_min and d_yield >= div_min:
-                # Recupero Storico per Volatilità
-                hist = get_fmp_data(f"historical-price-full/{symbol}", "&timeseries=20")
-                if hist and 'historical' in hist:
-                    df = pd.DataFrame(hist['historical'])
-                    curr_price = df['close'].iloc[0]
-                    vol = ((df['high'] - df['low']) / df['low']).mean() * 100
+            # Recupero Profilo per verificare Market Cap e Dividendo
+            profile = get_fmp(f"profile/{symbol}")
+            if profile and len(profile) > 0:
+                p = profile[0]
+                mcap = p.get('mktCap', 0) / 1e9
+                div = p.get('lastDiv', 0)
+                
+                # Applichiamo i tuoi parametri richiesti
+                if mcap >= mcap_limit and div >= div_limit:
+                    price = p.get('price', 0)
+                    strike = round((price * 0.90) * 2) / 2
                     
-                    if vol >= vol_min:
-                        strike = round((curr_price * 0.90) * 2) / 2
-                        results.append({
-                            "Ticker": symbol,
-                            "Prezzo": round(curr_price, 2),
-                            "Strike CSP (-10%)": strike,
-                            "Div. %": round(d_yield, 2),
-                            "Volat. %": round(vol, 2),
-                            "Market Cap (B)": round(mcap, 1)
-                        })
+                    results.append({
+                        "Ticker": symbol,
+                        "Nome": p.get('companyName', 'N/A'),
+                        "Settore": p.get('sector', 'N/A'),
+                        "Prezzo": price,
+                        "Strike Put (-10%)": strike,
+                        "Dividendo %": div,
+                        "Market Cap (B)": round(mcap, 2)
+                    })
+                    count += 1
             
-            progress_bar.progress((i + 1) / len(stocks))
+            progress_bar.progress(count / max_results)
 
-        status_text.empty()
+        status.empty()
         if results:
-            df_res = pd.DataFrame(results)
-            st.session_state['scan_results'] = df_res
-            st.write("### 📊 Risultati Screening")
-            st.dataframe(df_res.style.background_gradient(subset=['Div. %'], cmap='Greens')
-                                  .background_gradient(subset=['Volat. %'], cmap='Oranges'), 
-                         use_container_width=True)
+            df = pd.DataFrame(results)
+            st.success(f"Scansione terminata! Trovate {len(df)} opportunità.")
+            
+            # Tabella con formattazione colori
+            st.dataframe(df.style.background_gradient(subset=['Dividendo %'], cmap='YlGn'), use_container_width=True)
+            
+            # Export CSV
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Scarica Report Completo", csv, "wheel_scan_results.csv", "text/csv")
         else:
-            st.warning("Nessun titolo soddisfa i criteri con questa chiave API. Prova ad abbassare i filtri.")
+            st.error("Nessun titolo trovato con questi parametri o errore chiave API.")
     else:
-        st.error("Impossibile recuperare la lista titoli. Controlla la tua connessione o la validità della chiave.")
+        st.error("Impossibile connettersi al database FMP. Verifica l'email di conferma account.")
