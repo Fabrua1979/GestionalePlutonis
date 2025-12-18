@@ -1,44 +1,80 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
+import io
 
-st.set_page_config(page_title="Scanner Wheel Gratuito", layout="wide")
+st.set_page_config(page_title="Wheel Strategy Global Scanner", layout="wide")
 
-st.title("🎯 Scanner Mercato USA (Motore Yahoo Finance)")
-st.write("Questa versione non usa chiavi API e non può essere bloccata.")
+# --- 1. FUNZIONE PER RECUPERARE TUTTI I TITOLI (S&P 500) ---
+@st.cache_data
+def get_sp500_tickers():
+    # Scarica la lista aggiornata da Wikipedia
+    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+    table = pd.read_html(url)
+    df = table[0]
+    return df['Symbol'].tolist()
 
-# Lista di titoli famosi e liquidi
-TICKERS = ['AAPL', 'TSLA', 'NVDA', 'AMD', 'MSFT', 'AMZN', 'META', 'GOOGL', 'NFLX', 'PLTR', 'BABA', 'DIS']
+# --- 2. SIDEBAR PARAMETRI ---
+st.sidebar.header("⚙️ Filtri di Scansione")
+mcap_min = st.sidebar.slider("Market Cap Minima (Biliardi $)", 1, 500, 50)
+div_min = st.sidebar.number_input("Dividend Yield Min (%)", value=1.0)
+vol_min = st.sidebar.slider("Volatilità Mensile Min (%)", 0.0, 10.0, 1.5)
+limit_scan = st.sidebar.number_input("Limite titoli da scansionare", value=100, help="Scansionare 500 titoli richiede tempo. Inizia con 100.")
 
-if st.button('🚀 AVVIA SCANSIONE ORA'):
-    results = []
-    prog = st.progress(0)
-    status = st.empty()
+st.title("🎯 Wheel Strategy Global Scanner")
+st.caption("Scansione automatica dei componenti dell'S&P 500 tramite Yahoo Finance.")
+
+if st.button('🚀 AVVIA SCANSIONE MASSIVA'):
+    all_tickers = get_sp500_tickers()
+    tickers_to_scan = all_tickers[:limit_scan]
     
-    for i, t in enumerate(TICKERS):
-        status.text(f"Scaricando dati per {t}...")
+    results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, symbol in enumerate(tickers_to_scan):
+        # Correzione per simboli con il punto (es: BRK.B -> BRK-B)
+        symbol = symbol.replace('.', '-')
+        status_text.text(f"🔎 Analisi di {symbol} ({i+1}/{len(tickers_to_scan)})...")
+        
         try:
-            ticker_data = yf.Ticker(t)
-            info = ticker_data.info
+            t = yf.Ticker(symbol)
+            info = t.info
             
-            price = info.get('currentPrice')
-            if price:
-                # Calcoliamo lo strike per la Put (-10%)
-                strike = round(price * 0.90, 1)
-                results.append({
-                    "Ticker": t,
-                    "Prezzo Attuale": f"{price:.2f}$",
-                    "Strike Consigliato (-10%)": f"{strike:.2f}$",
-                    "Settore": info.get('sector', 'N/A'),
-                    "Market Cap (B)": f"{info.get('marketCap', 0) / 1e9:.1f}"
-                })
+            # Filtri Fondamentali
+            mcap = info.get('marketCap', 0) / 1e9
+            div_yield = info.get('dividendYield', 0) * 100
+            curr_price = info.get('currentPrice')
+            
+            if curr_price and mcap >= mcap_min and div_yield >= div_min:
+                # Calcolo Volatilità Tecnica
+                hist = t.history(period="1mo")
+                if not hist.empty:
+                    vol_mensile = ((hist['High'] - hist['Low']) / hist['Low']).mean() * 100
+                    
+                    if vol_mensile >= vol_min:
+                        strike = round((curr_price * 0.90) * 2) / 2
+                        results.append({
+                            "Ticker": symbol,
+                            "Prezzo": curr_price,
+                            "Strike CSP (-10%)": strike,
+                            "Div. %": round(div_yield, 2),
+                            "Volat. %": round(vol_mensile, 2),
+                            "Cap. (B)": round(mcap, 1),
+                            "Settore": info.get('sector', 'N/A')
+                        })
         except:
             continue
-        prog.progress((i + 1) / len(TICKERS))
-    
-    status.empty()
+        progress_bar.progress((i + 1) / len(tickers_to_scan))
+
+    status_text.empty()
     if results:
-        st.write("### 📊 Risultati Analisi")
-        st.table(pd.DataFrame(results))
+        df_res = pd.DataFrame(results)
+        st.session_state['scan_results'] = df_res
+        st.write(f"### 📊 Risultati: Trovati {len(results)} titoli corrispondenti")
+        st.dataframe(df_res.style.background_gradient(subset=['Div. %'], cmap='Greens')
+                                  .background_gradient(subset=['Volat. %'], cmap='Oranges')
+                                  .format({'Prezzo': '{:.2f}$', 'Strike CSP (-10%)': '{:.2f}$'}), 
+                     use_container_width=True)
     else:
-        st.error("Errore nel recupero dati da Yahoo Finance. Riprova tra un istante.")
+        st.warning("Nessun titolo trovato. Prova ad allentare i filtri nella sidebar.")
