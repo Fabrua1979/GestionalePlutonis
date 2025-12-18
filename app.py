@@ -8,11 +8,16 @@ st.set_page_config(page_title="Wheel Strategy Global Scanner", layout="wide")
 # --- 1. FUNZIONE PER RECUPERARE TUTTI I TITOLI (S&P 500) ---
 @st.cache_data
 def get_sp500_tickers():
-    # Scarica la lista aggiornata da Wikipedia
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    table = pd.read_html(url)
-    df = table[0]
-    return df['Symbol'].tolist()
+    try:
+        # AGGIORNATO: flavor='bs4' risolve l'errore ImportError online
+        url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
+        table = pd.read_html(url, flavor='bs4') 
+        df = table[0]
+        return df['Symbol'].tolist()
+    except Exception as e:
+        # Lista di emergenza in caso di errori di connessione a Wikipedia
+        st.sidebar.warning(f"Nota: Caricata lista predefinita (Wikipedia non raggiungibile)")
+        return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'NFLX', 'AMD', 'PLTR']
 
 # --- 2. SIDEBAR PARAMETRI ---
 st.sidebar.header("⚙️ Filtri di Scansione")
@@ -26,7 +31,8 @@ st.caption("Scansione automatica dei componenti dell'S&P 500 tramite Yahoo Finan
 
 if st.button('🚀 AVVIA SCANSIONE MASSIVA'):
     all_tickers = get_sp500_tickers()
-    tickers_to_scan = all_tickers[:limit_scan]
+    # Limitiamo la scansione per non sovraccaricare il sistema
+    tickers_to_scan = all_tickers[:int(limit_scan)]
     
     results = []
     progress_bar = st.progress(0)
@@ -47,12 +53,13 @@ if st.button('🚀 AVVIA SCANSIONE MASSIVA'):
             curr_price = info.get('currentPrice')
             
             if curr_price and mcap >= mcap_min and div_yield >= div_min:
-                # Calcolo Volatilità Tecnica
+                # Calcolo Volatilità Tecnica (Ultimo mese)
                 hist = t.history(period="1mo")
                 if not hist.empty:
                     vol_mensile = ((hist['High'] - hist['Low']) / hist['Low']).mean() * 100
                     
                     if vol_mensile >= vol_min:
+                        # Calcolo Strike prudenziale (-10% dal prezzo attuale)
                         strike = round((curr_price * 0.90) * 2) / 2
                         results.append({
                             "Ticker": symbol,
@@ -72,9 +79,17 @@ if st.button('🚀 AVVIA SCANSIONE MASSIVA'):
         df_res = pd.DataFrame(results)
         st.session_state['scan_results'] = df_res
         st.write(f"### 📊 Risultati: Trovati {len(results)} titoli corrispondenti")
+        
+        # Tabella con formattazione professionale
         st.dataframe(df_res.style.background_gradient(subset=['Div. %'], cmap='Greens')
                                   .background_gradient(subset=['Volat. %'], cmap='Oranges')
                                   .format({'Prezzo': '{:.2f}$', 'Strike CSP (-10%)': '{:.2f}$'}), 
                      use_container_width=True)
+        
+        # Export Excel
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_res.to_excel(writer, index=False)
+        st.download_button("📥 Scarica Report Excel", buffer.getvalue(), "scanner_wheel.xlsx")
     else:
         st.warning("Nessun titolo trovato. Prova ad allentare i filtri nella sidebar.")
